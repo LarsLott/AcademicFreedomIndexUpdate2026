@@ -102,9 +102,6 @@ afi_color_main_rev <- c("#666666", "#002F6C", "#E87722", "#920050", "#000000","#
 two_afi_color <- c("#E87722", "#920050")
 
 
-# Set you working directory here #
-setwd("P:/PIPM/7. VWS Projekt Academic Freedom Index/Annual Updates/Annual Update 2026")
-
 #---------------------------------------------------#
 #--------------------load data ---------------------#
 #---------------------------------------------------#
