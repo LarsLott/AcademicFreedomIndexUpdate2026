@@ -1,0 +1,1 @@
+Reproduction materials for Katrin Kinzelbach, Staffan I. Lindberg, Lott, Lars and Angelo V. Panaro (2026). Academic Freedom Index 2026 Update. FAU Erlangen-Nürnberg and V-Dem Institute. doi:10.25593/open-fau-2865
