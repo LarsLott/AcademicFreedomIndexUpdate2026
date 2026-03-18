@@ -1,0 +1,1762 @@
+---
+title: ""
+author: ""
+editor: visual
+format:
+
+  pdf:
+    linestretch: 1.5
+    papersize: a4
+    pdf-engine: lualatex
+    mainfont: "Myriad-Pro"
+    documentclass: report
+    geometry:
+      - top=25mm
+      - left=25mm
+      - right=25mm
+      - bottom=25mm
+      - heightrounded  
+      
+execute: 
+  warning: false
+header-includes:
+  - \usepackage[font=small]{caption}
+  - \usepackage{setspace}
+  - \usepackage{fontspec}
+  - \usepackage{lscape}
+  - \newcommand{\blandscape}{\begin{landscape}}
+  - \newcommand{\elandscape}{\end{landscape}}
+bibliography: AFi.bib 
+csl: "chicago-fullnote-bibliography-16th-edition.csl"
+cite-method: citeproc
+---
+
+```{r data processing, include= FALSE}
+
+#----------------#
+# AFI UPDATE 2026#
+#---------------#
+
+#### Preliminaries ####
+#R.version$version.string
+
+# clear workspace
+rm(list=ls())
+
+#install.packages("systemfonts")
+systemfonts::system_fonts()
+
+# load packages
+library(openxlsx)
+
+library(here)
+library(ggplot2)
+library(rlang)
+#library(here)
+library(tidyverse)
+library(rworldmap) # maps
+library(cowplot)
+
+library(broom)
+library(purrr)
+library(modelsummary)
+
+library(ggrepel)
+library(ggpubr)
+library(grid)
+#install.packages("ggfx")
+library(ggfx)
+#install.packages("ggh4x", repos = "https://cloud.r-project.org")
+library(ggh4x)
+
+
+library(patchwork)
+library(ggthemes)
+library(gridExtra)
+library(geomtextpath)
+
+#remove.packages("AFIUpdatePackage")
+#install.packages("P:/PIPM/7. VWS Projekt Academic Freedom Index/Annual Updates/AFIUpdatePackage_0.0.1.tar.gz",repos = NULL,type = "source")
+library(AFIUpdatePackage)
+
+
+#install.packages("devtools")
+#devtools::install_github("https://github.com/larslott/EpisodeR")
+library(EpisodeR)
+
+library(extrafont)
+
+# Load the package
+library(showtext)
+
+
+#---------------------------------------------------#
+#--------------------color_palette------------------#
+#---------------------------------------------------#
+
+afi_color_main <- c("#000000", "#666666", "#7685A6", "#002F6C", "#FFB81C", "#E87722", "#920050", "#C56D97")
+afi_color_secondary <- c("#617E45", "#A1B2C9", "#0A5F4B", "#629E93", "#FFD372", "#F4AA77", "#C88264", "#E2B6A5")
+
+afi_color_main_rev <- c("#666666", "#002F6C", "#E87722", "#920050", "#000000","#C56D97", "#7685A6", "#002F6C")
+
+two_afi_color <- c("#E87722", "#920050")
+
+
+# Set you working directory here #
+setwd("P:/PIPM/7. VWS Projekt Academic Freedom Index/Annual Updates/Annual Update 2026")
+
+#---------------------------------------------------#
+#--------------------load data ---------------------#
+#---------------------------------------------------#
+
+#V-16 dataset 
+vdem_v16 <- readRDS("data/V-Dem-CY-Full+Others-v16.rds")
+
+vdem <- vdem_v16
+
+## load new Growth and Decline Episode Data with EpisodeR Package
+episode_data <- readRDS("data/episode_data_v16.rds")
+episode_data_wo_uncer <- readRDS("data/episode_data_wo_uncer_v16.rds")
+
+
+#--------------------------------------------------#
+#                 Data Preparation                 #
+#--------------------------------------------------#
+
+# Subset the v-dem full dataset
+vdem <- vdem %>%
+  dplyr::select(country_name,country_text_id, year, country_id, 
+              starts_with("v2xca_academ"),
+              starts_with("v2cafres"), starts_with("v2cafexch"), 
+              starts_with("v2cainsaut"), starts_with("v2casurv"), 
+              starts_with("v2clacfree"),
+              e_regionpol_6C, 
+              e_wb_pop) %>%
+  group_by(country_text_id) %>%
+  fill(e_wb_pop, .direction = "down")
+
+
+#---------------------#
+##number of coders v16
+#---------------------#
+no_coders_v16 <- 2357 
+no_coders_v15 <- 2347 
+no_coders_v14 <- 2329
+no_coders_v13 <- 2197
+
+#number of countries included
+number_of_countries <- length(unique(subset(subset(vdem, year==2025), is.na(v2xca_academ)==F)$country_name)) 
+```
+
+## Executive Summary
+
+```{r Decline_Increase_indicators, include = FALSE}
+
+# Indicators
+indicators <- c("v2xca_academ",
+                "v2cainsaut_osp",
+                "v2cafres_osp",
+                "v2cafexch_osp",
+                "v2casurv_osp",
+                "v2clacfree_osp")
+
+# Substantial & s. significant change
+compute_change <- function(var) {
+  
+  vdem %>%
+    filter(year %in% c(2015, 2025)) %>%
+    select(country_text_id,
+           country_id,
+           country_name, 
+           year,
+           all_of(var),
+           paste0(var, "_codelow"),
+           paste0(var, "_codehigh"),
+           e_regionpol_6C) %>%
+    
+    pivot_wider(
+      names_from = year,
+      values_from = c(all_of(var),
+                      paste0(var, "_codelow"),
+                      paste0(var, "_codehigh")),
+      names_sep = "_") %>%
+    
+    mutate(indicator = var,
+      # 10-year change
+      delta = .data[[paste0(var, "_2025")]] -
+              .data[[paste0(var, "_2015")]],
+      
+      # Statistically significant 
+      significant = case_when(
+        # Significant decline
+        .data[[paste0(var, "_codehigh_2025")]] <
+          .data[[paste0(var, "_codelow_2015")]] &
+          delta <= -0.1 ~ "negative",
+        # Significant increase
+        .data[[paste0(var, "_codelow_2025")]] >
+          .data[[paste0(var, "_codehigh_2015")]] &
+          delta >= 0.1 ~ "positive",
+
+        TRUE ~ "no_sig"))
+}
+
+
+results_all <- map_dfr(indicators, compute_change) %>%
+  arrange(country_text_id)
+
+# Number of countries per indicator
+indicator_counts <- results_all %>%
+  filter(significant != "no_sig") %>%
+  group_by(indicator, significant) %>%
+  summarise(
+    n_countries = n(),
+    .groups = "drop")
+
+#Bottom (2015-2025)
+top_decline <- indicator_counts %>%
+  filter(significant == "negative") %>%
+  arrange(desc(n_countries)) %>%
+  slice_head(n = 6)
+
+#Top (2015-2025)
+top_increase <- indicator_counts %>%
+  filter(significant == "positive") %>%
+  arrange(desc(n_countries)) %>%
+  slice_head(n = 6)
+
+
+# Prepare data for plotting
+plot_data <- indicator_counts %>%
+  mutate(
+    indicator_label = recode(indicator,
+                             v2xca_academ = "Academic Freedom",
+                             v2cainsaut_osp   = "Institutional Autonomy",
+                             v2cafres_osp     = "Freedom to Research and Teach",
+                             v2cafexch_osp    = "Freedom of Academic Exchange",
+                             v2casurv_osp     = "Campus Integrity",
+                             v2clacfree_osp  = "Freedom of Academic and Cultural Expression"),
+    significant_label = recode(significant,
+                               "negative" = "Decline",
+                               "positive" = "Increase"))
+
+# Organize the levels
+plot_data$indicator_label <- factor(
+  plot_data$indicator_label,
+  levels = c(
+    "Academic Freedom",
+    "Institutional Autonomy",
+    "Freedom to Research and Teach",
+    "Freedom of Academic Exchange",
+    "Campus Integrity",
+    "Freedom of Academic and Cultural Expression"))
+
+# Ensure consistent ordering of bars
+plot_data$significant_label <- factor(
+  plot_data$significant_label,
+  levels = c("Decline", "Increase"))
+
+
+# Horizontal bar plot
+plot_indicator_hbar <- function(indicator_name) {
+  
+  df <- plot_data %>% 
+    filter(indicator_label == indicator_name)
+  
+   ggplot(df, aes(x = n_countries, 
+                  y = significant_label, 
+                  fill = significant_label)) +
+     geom_col(show.legend = FALSE) + 
+    
+    # Text labels at the end of bars
+    geom_text(aes(x = n_countries -2, # 20% inset from bar end
+                  y = significant_label, 
+                  label = n_countries),
+              hjust = 1,
+              color = "white",
+              size = 4.5,
+              fontface = "bold") +
+    
+    scale_fill_manual(values = c(
+      "Decline" = "#920050",
+      "Increase" = "#002F6C")) + 
+     
+    coord_cartesian(clip = "off") +  # make room for text
+    labs(
+      x = NULL,
+      y = NULL,
+      fill = NULL, 
+      title = indicator_name) +
+     
+    scale_x_continuous(limits = c(0, 55))+
+     
+    theme_minimal(base_size = 10) +
+     
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      plot.title = element_text(face = "bold", 
+                                size = 10,
+                                hjust = 0.5))
+   
+}
+  
+  
+# Generate plots
+
+indicator_name <- "Academic Freedom"
+
+df <- plot_data %>% 
+    filter(indicator_label == indicator_name)
+
+labels_df <- data.frame(significant_label = c("Decline", "Increase"), 
+                     n_countries  = c(25, 25), 
+                     label = c("Decline", "Increase"))
+  
+p_top <- ggplot(df, aes(x = n_countries, 
+                  y = significant_label, 
+                  fill = significant_label)) +
+     geom_col(show.legend = FALSE) + 
+    
+    # Text labels at the end of bars
+    geom_text(aes(x = n_countries -2, # 20% inset from bar end
+                  y = significant_label, 
+                  label = n_countries),
+              hjust = 1,
+              color = "white",
+              size = 4.5,
+              fontface = "bold") +
+  
+    # Legend labels at the end of bars
+    geom_text(data = labels_df, 
+              aes(x = n_countries,
+                  y = significant_label, 
+                  label = label),
+              hjust = "center",
+              color = c("white", "#002F6C"),
+              size = 5,
+              fontface = "bold") +
+  
+    scale_fill_manual(values = c(
+      "Decline" = "#920050",
+      "Increase" = "#002F6C")) + 
+     
+    coord_cartesian(clip = "off") +  # make room for text
+    labs(
+      x = NULL,
+      y = NULL,
+      fill = NULL, 
+      title = indicator_name) +
+     
+    scale_x_continuous(limits = c(0, 55)) +
+     
+    theme_minimal(base_size = 10) +
+    labs(title ="Academic Freedom Index") +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+    plot.title = element_text(
+                      face = "bold",
+                      size = 17, 
+                      hjust = 0.5))
+
+
+left_col <- plot_indicator_hbar("Institutional Autonomy") / 
+            plot_indicator_hbar("Campus Integrity") /
+            plot_spacer()
+
+right_col <- plot_indicator_hbar("Freedom to Research and Teach") /
+             plot_indicator_hbar("Freedom of Academic Exchange") /
+             plot_indicator_hbar("Freedom of Academic and Cultural Expression")
+
+
+top_row <- plot_spacer() | p_top | plot_spacer()
+
+# Column titles as text grobs
+left_title  <- wrap_elements(
+  grid::textGrob("Institutional Dimension", 
+                 gp = grid::gpar(fontsize = 17, fontface = "bold"),
+                 just = "center"))  # center text
+
+right_title <- wrap_elements(
+  grid::textGrob("Individual Dimension", 
+                 gp = grid::gpar(fontsize = 17, fontface = "bold"),
+                 just = "center"))
+
+# Add titles above each column
+left_col_with_title  <- left_title / left_col + plot_layout(heights = c(0.2, 1))
+right_col_with_title <- right_title / right_col + plot_layout(heights = c(0.2, 1))
+
+# Combine: 3 columns
+combined_plot <- top_row / 
+  (left_col_with_title | plot_spacer() | right_col_with_title) +
+  plot_layout(
+    guides = "collect",
+    heights = c(1.4, 4),   # top plot smaller
+    widths  = c(1, 1, 1.4)) &
+  theme(
+    legend.position = "bottom",
+    plot.margin = margin(t = 2, r = 2, b = 2, l = 2),
+    plot.title = element_text(margin = margin(b = 2)))
+
+afi_negative <- indicator_counts$n_countries[indicator_counts$indicator == "v2xca_academ" & indicator_counts$significant == "negative"]
+
+afi_positive <- indicator_counts$n_countries[indicator_counts$indicator == "v2xca_academ" & indicator_counts$significant == "positive"]
+
+v2cafres_negative <- indicator_counts$n_countries[indicator_counts$indicator == "v2cafres_osp" & indicator_counts$significant == "negative"]
+v2cafres_positive <- indicator_counts$n_countries[indicator_counts$indicator == "v2cafres_osp" & indicator_counts$significant == "positive"]
+
+v2cafexch_negative <- indicator_counts$n_countries[indicator_counts$indicator == "v2cafexch_osp" & indicator_counts$significant == "negative"]
+v2cafexch_positive <- indicator_counts$n_countries[indicator_counts$indicator == "v2cafexch_osp" & indicator_counts$significant == "positive"]
+
+v2cainsaut_negative <- indicator_counts$n_countries[indicator_counts$indicator == "v2cainsaut_osp" & indicator_counts$significant == "negative"]
+v2cainsaut_positive <- indicator_counts$n_countries[indicator_counts$indicator == "v2cainsaut_osp" & indicator_counts$significant == "positive"]
+
+v2casurv_negative <- indicator_counts$n_countries[indicator_counts$indicator == "v2casurv_osp" & indicator_counts$significant == "negative"]
+v2casurv_positive <- indicator_counts$n_countries[indicator_counts$indicator == "v2casurv_osp" & indicator_counts$significant == "positive"]
+
+v2clacfree_negative <- indicator_counts$n_countries[indicator_counts$indicator == "v2clacfree_osp" & indicator_counts$significant == "negative"]
+v2clacfree_positive <- indicator_counts$n_countries[indicator_counts$indicator == "v2clacfree_osp" & indicator_counts$significant == "positive"]
+
+```
+
+Over the last decade, academic freedom has declined in `r toString(afi_negative)` countries, and only `r toString(afi_positive)` countries have registered improvements (@fig-countries).[^1] While all dimensions of academic freedom are now declining in more countries than those in which they are improving, the most widespread declines are occurring in individual-level dimensions and campus integrity. By contrast, fewer countries are experiencing declines in institutional autonomy.
+
+[^1]: We refer to countries that have experienced a substantial and statistically significant decline or increase. A decline or increase is considered substantial if it is 0.1 or greater, and statistically significant if the uncertainty intervals do not overlap.
+
+This year’s report nevertheless focuses on institutional autonomy, which is widely recognized as fundamental to protecting individual-level dimensions of academic freedom. Our data confirm that higher levels of institutional autonomy are associated with stronger protection for the freedom of individual academics.
+
+In addition, our data show that declines in institutional autonomy are widespread among (former) democracies, and the decline in institutional autonomy in the United States stands out as a case of fast and steep deterioration that warrants comparative analysis.
+
+```{r Decline_Increase_indicators_plot, include = TRUE}
+#| label: fig-countries
+#| echo: false
+#| warning: false
+#| fig-height: 6
+#| fig-width: 10
+#| fig-align: center
+#| out-width: "100%"
+#| fig-pos: "H"
+#| fig-cap: "Number of countries that experienced substantial and statistically significant \\textbf{\\textcolor[HTML]{920050}{declines}} or \\textbf{\\textcolor[HTML]{002F6C}{increases}} between 2015 and 2025. Substantial decline is identified if the uncertainty intervals do not overlap and if the decline is >=0.1 for the AFI."
+
+combined_plot
+```
+
+```{r Decline_Increase_indicators_saving, include = FALSE, echo=FALSE}
+
+ggsave(
+  filename = "figs/fig-countries.png",
+  plot = combined_plot,
+  width = 10,
+  height = 6,
+  dpi = 300)
+```
+
+Academic freedom is a multi-dimensional concept encompassing both individual and institutional dimensions. The Academic Freedom Index (AFI) reflects this by assessing *de facto* protection of freedoms at both levels, using a peer-reviewed approach [@spannagel_academic_2023; @Lott_Spannagel_2025] and a customized Bayesian IRT-measurement model developed in the V-Dem project. It draws on the expertise of `r toString(scales::label_comma(accuracy = NULL)(no_coders_v16))` scholars worldwide and over one million data points collected at the coder level.[Curated in version 16 of the V-Dem dataset: @coppedge_vdem_2026] The data is freely accessible at [academic-freedom-index.net](https://academic-freedom-index.net){.uri} and [v-dem.net](https://www.v-dem.net/data/the-v-dem-dataset/).
+
+At the individual level, AFI indicators cover the freedom to research and teach, the freedom of academic exchange and dissemination, and the freedom of academic and cultural expression. At the institutional level, the AFI comprises institutional autonomy and campus integrity, which together safeguard the well-functioning of academic institutions without undue interference from non-academic actors.[^2]
+
+[^2]: "Non-academic actors" refers to individuals and groups that are not scientifically trained university affiliates. This includes individuals and groups such as politicians, party secretaries, externally appointed university management, businesses, foundations, other private funders, religious groups, and advocacy groups. See @coppedge_vdem_2026 [pp. 240-241]
+
+Debate about the role of institutional autonomy in academic freedom has gained recent attention. Some scholars and political actors argue that institutional autonomy may engender universities that suppress viewpoint diversity. In contrast, the AFI data highlight that institutional autonomy is positively associated with the freedom to research and teach. This supports the argument that institutional autonomy is, indeed, essential for protecting individual academics’ freedom.
+
+The data also show that the United States has experienced a remarkably sharp drop in institutional autonomy compared to other countries in Western Europe and North America (@fig-peers_us) and also compared to major autocratizing countries such as Hungary, India, and Türkiye, where institutional autonomy has declined more gradually (@fig-cases). In the US, the initial decline began in 2020, driven largely by state-level actions. It intensified in 2025 under the second Trump Administration, driven by an unprecedented array of coercive federal executive measures that amplified and fueled state-level pressures on autonomous universities.
+
+The US case illustrates how quickly institutional autonomy can be damaged via coercive executive action, yet it also suggests that pushback by academic institutions, civil society organizations, and court action against illegal measures are key to protecting academic freedom in autocratizing countries.
+
+## The State of Academic Freedom 2025
+
+```{r world map processing, include = FALSE}
+
+world_map <- plot_world_map_ggplot(year_to_plot = 2025)
+
+```
+
+```{r world_map}
+#| echo: false
+#| fig-height: 10
+#| fig-width: 20
+#| out-height: "120%"
+#| fig-pos: "H"
+#| label: fig-world_map
+#| fig-cap: "The State of Academic Freedom in 2025 (0–1, low to high)"
+
+# Map
+world_map
+```
+
+```{r map-saving, include=FALSE}
+
+OUTDIR  <- "figs/Update 2026"
+
+dir.create(OUTDIR, showWarnings = F, recursive = T)
+
+stopifnot(dir.exists(OUTDIR))
+
+ggsave(plot = world_map, "figs/world_map.png", dpi = 600, width = 465, height = 295, units='mm')
+```
+
+In 2025, academic freedom remains more protected in Latin America, Europe, North America, Oceania, and large parts of Southern and Western Africa, than in Asia and the Middle East and North Africa (MENA), as shown in @fig-world_map, which visualizes *de facto* levels of academic freedom across the world.
+
+@fig-averages_plot shows that academic freedom began to decline globally around 2012, largely driven by setbacks in Latin America, Asia, and the MENA region.
+
+The population-weighted plot (@fig-averages_plot, right panel) underscores the severity of this trend, revealing a more pronounced global decline in academic freedom. Although the decline remains largely within the uncertainty bounds for country averages, subsequent years show a continued downward trend, which is also influenced by a decline in Western Europe and North America, whereas improvements are mostly located in Latin America.
+
+```{r time_series_averages, include = FALSE}
+
+year_min = 1960
+year_max = 2025
+variable = "v2xca_academ"
+var_label = "Academic Freedom Index"
+pop_measure = "e_wb_pop"
+
+#### F1 ####
+
+vdem_fig <- vdem %>%
+  dplyr::select(country_name, year, e_regionpol_6C, matches(variable, ignore.case = FALSE)) %>%
+  filter(year %in% c(year_min:year_max)) %>%
+  group_by(e_regionpol_6C, year) %>%
+  summarize(var_region_mean = mean(get(variable), na.rm = T))%>%
+  mutate(e_regionpol_6C = case_when(e_regionpol_6C ==1 ~ "Eastern Europe and Central Asia",
+                                    e_regionpol_6C ==2 ~ "Latin America and the Caribbean",
+                                    e_regionpol_6C ==3 ~ "The Middle East and North Africa",
+                                    e_regionpol_6C ==4 ~ "Sub-Saharan Africa",
+                                    e_regionpol_6C ==5 ~ "Western Europe and North America",
+                                    e_regionpol_6C ==6 ~ "Asia and Pacific"),
+         var_region_codehigh = NA,
+         var_region_codelow = NA)
+
+
+vdem_fig_world <- vdem %>%
+  dplyr::select(country_name, year, e_regionpol_6C, matches(variable, ignore.case = FALSE)) %>%
+  filter(year %in% c(year_min:year_max)) %>%
+  group_by(year) %>%
+  summarize(var_region_mean = mean(get(variable), na.rm = T),
+            var_region_codehigh = mean(get(paste0(variable, "_codehigh")), na.rm = T),
+            var_region_codelow = mean(get(paste0(variable, "_codelow")), na.rm = T))%>%
+  mutate(e_regionpol_6C = "World")
+
+
+vdem_fig <- rbind(vdem_fig, vdem_fig_world)
+
+positions_world <- rep(c(0.7), each = length(unique(vdem_fig_world$year)))
+positions_regions <- rep(c(0.9, 0.02, 0.85, 0.85, 0.5, 0.7), each = length(unique(vdem_fig_world$year)))
+
+
+annot_df_y <- data.frame(
+  x = c(1958, 1958),                
+  y = c(0.05, 0.95),              
+  label = c("\u2190 Completly Restricted", "Fully Free \u2192"),
+  hjust = c(0, 1)
+)
+
+
+
+f1 <- ggplot(vdem_fig, aes(x =year, y = var_region_mean, color = e_regionpol_6C, fill = e_regionpol_6C)) +
+  geom_ribbon(data = subset(vdem_fig, e_regionpol_6C == "World"),
+              aes(ymin=var_region_codelow, ymax= var_region_codehigh), alpha = 0.4) +
+  geom_textline(data = subset(vdem_fig, e_regionpol_6C == "World"),
+    aes(label = e_regionpol_6C, linetype = e_regionpol_6C),
+    linewidth = 1.2,
+    text_smoothing = 50,
+    hjust = positions_world,
+    size = 6,
+    fontface = "bold",
+    vjust = -0.3, # move text slightly above the line
+    gap = FALSE # make sure line will not be broken
+  ) +
+  geom_textline(
+    data = subset(vdem_fig, e_regionpol_6C != "World"),
+    aes(label = e_regionpol_6C, linetype = e_regionpol_6C),
+    text_smoothing = 50,
+    hjust = positions_regions,
+    size = 4,
+    alpha = 0.6,
+    fontface = "bold",
+    vjust = -0.3, # move text slightly above the line
+    gap = FALSE # make sure line will not be broken
+  ) +
+  geom_text(
+    data = annot_df_y,
+    aes(x = x, y = y, label = label, hjust = hjust),
+    inherit.aes = FALSE,
+    size = 5,                    
+    fontface = "plain",
+    color = "black", 
+    angle = 90
+  ) +
+  theme_pubr() +
+  scale_colour_manual(values = afi_color_main) +
+  scale_fill_manual(values = afi_color_main) +
+  scale_linetype_manual(values = c("twodash", "dotted", "longdash", "dotdash", "dashed", "twodash" ,"solid"))+
+  ylim(0,1)+
+  scale_x_continuous(breaks = seq(1960, 2025, 10), limits = c(1958,2025))+
+  scale_y_continuous(limits = c(0, 1),
+                     breaks = seq(0, 1, 0.25),
+                     labels = function(x) {ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))}) +
+  labs(y = var_label,
+       color = "", x = "Year",
+       fill = "",
+       linetype = "",
+       title = "",
+       subtitle = "",
+       caption = "") +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title.x = element_text(margin = margin(t = 5), size = 20),
+    axis.title.y = element_text(margin = margin(r = 5), size = 20)
+  )
+
+#### F2 ####
+
+pop_year_measure <- vdem %>%
+    group_by(country_name) %>%
+    filter(year %in% c(year_min:year_max)) %>%
+    group_by(year) %>%
+    summarize(pop_world_sum = sum(get(pop_measure), na.rm = T)) %>%
+    mutate(pop_world_sum = ifelse(pop_world_sum==0, NA, pop_world_sum))
+
+vdem_fig <- vdem %>%
+    dplyr::select(country_name, year, e_regionpol_6C, 
+                  matches(variable, ignore.case = FALSE), all_of(pop_measure)) %>%
+    filter(year %in% c(year_min:year_max)) %>%
+    left_join(pop_year_measure, by = c("year")) %>%
+    mutate(pop_weight = get(pop_measure) / pop_world_sum) %>%
+    drop_na(pop_weight) %>%
+    group_by(e_regionpol_6C, year) %>%
+    summarize(var_region_mean = weighted.mean(get(variable), 
+                                              pop_weight, na.rm = T))%>%
+    mutate(e_regionpol_6C = case_when(e_regionpol_6C ==1 ~ "Eastern Europe and Central Asia",
+                                      e_regionpol_6C ==2 ~ "Latin America and the Caribbean",
+                                      e_regionpol_6C ==3 ~ "The Middle East and North Africa",
+                                      e_regionpol_6C ==4 ~ "Sub-Saharan Africa",
+                                      e_regionpol_6C ==5 ~ "Western Europe and North America",
+                                      e_regionpol_6C ==6 ~ "Asia and Pacific"),
+           var_region_codehigh = NA,
+           var_region_codelow = NA)
+
+
+vdem_fig_world <- vdem %>%
+    dplyr::select(country_name, year, e_regionpol_6C, 
+                  matches(variable, ignore.case = FALSE), all_of(pop_measure)) %>%
+    filter(year %in% c(year_min:year_max)) %>%
+    left_join(pop_year_measure, by = c("year")) %>%
+    mutate(pop_weight = get(pop_measure) / pop_world_sum) %>%
+    drop_na(pop_weight) %>%
+    group_by(year) %>%
+    summarize(var_region_mean =  weighted.mean(get(variable), 
+                                               pop_weight,  na.rm = T),
+              var_region_codehigh =  weighted.mean(get(paste0(variable, "_codehigh")), pop_weight, na.rm = T),
+              var_region_codelow =  weighted.mean(get(paste0(variable, "_codelow")), pop_weight, na.rm = T))%>%
+    mutate(e_regionpol_6C = "World")
+
+vdem_fig <- rbind(vdem_fig, vdem_fig_world)
+
+positions_world <- rep(c(0.85), each = length(unique(vdem_fig_world$year)))
+positions_regions <- rep(c(0.9, 0.02, 0.85, 0.85, 0.5, 0.7), each = length(unique(vdem_fig_world$year)))
+
+
+annot_df_y <- data.frame(
+  x = c(1958, 1958),                
+  y = c(0.05, 0.95),              
+  label = c("\u2190 Completly Restricted", "Fully Free \u2192"),
+  hjust = c(0, 1)
+)
+
+
+f2 <- ggplot(vdem_fig, aes(x =year, y = var_region_mean,
+                           color = e_regionpol_6C, fill = e_regionpol_6C)) +
+  geom_ribbon(data = subset(vdem_fig, e_regionpol_6C == "World"),
+              aes(ymin=var_region_codelow, ymax= var_region_codehigh), alpha = 0.4) +
+  geom_textline(data = subset(vdem_fig, e_regionpol_6C == "World"),
+    aes(label = e_regionpol_6C, linetype = e_regionpol_6C),
+    linewidth = 1.2,
+    text_smoothing = 50,
+    hjust = positions_world,
+    size = 6,
+    fontface = "bold",
+    vjust = -0.3, # move text slightly above the line
+    gap = FALSE # make sure line will not be broken
+  ) +
+  geom_textline(
+    data = subset(vdem_fig, e_regionpol_6C != "World"),
+    aes(label = e_regionpol_6C, linetype = e_regionpol_6C),
+    text_smoothing = 50,
+    hjust = positions_regions,
+    size = 4,
+    alpha = 0.6,
+    fontface = "bold",
+    vjust = -0.3, # move text slightly above the line
+    gap = FALSE # make sure line will not be broken
+  ) +
+  geom_text(
+    data = annot_df_y,
+    aes(x = x, y = y, label = label, hjust = hjust),
+    inherit.aes = FALSE,
+    size = 5,                    
+    fontface = "plain",
+    color = "black", 
+    angle = 90
+  ) +
+  theme_pubr() +
+  scale_colour_manual(values = afi_color_main) +
+  scale_fill_manual(values = afi_color_main) +
+  scale_linetype_manual(values = c("twodash", "dotted", "longdash", "dotdash", "dashed", "twodash" ,"solid"))+
+  ylim(0,1)+
+  scale_x_continuous(breaks = seq(1960, 2025, 10), limits = c(1958,2025))+
+  scale_y_continuous(limits = c(0, 1),
+                     breaks = seq(0, 1, 0.25),
+                     labels = function(x) {ifelse(x %% 1 == 0, as.character(as.integer(x)), as.character(x))}) +
+  labs(y = var_label,
+       color = "", x = "Year",
+       fill = "",
+       linetype = "",
+       title = "",
+       subtitle = "",
+       caption = "") +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title.x = element_text(margin = margin(t = 5), size = 20),
+    axis.title.y = element_text(margin = margin(r = 5), size = 20)
+  )
+
+```
+
+The thick pink line in @fig-averages_plot denotes the global average of the Academic Freedom Index since `r toString(year_min)`: the shaded light-pink area represents the uncertainty interval for both country averages (left panel) and population-weighted averages (right panel). The population-weighted perspective emphasizes an egalitarian approach to academic freedom, reflecting the notion that academic freedom concerns people’s right and opportunity to freely pursue science. The country-averages prioritize government performance, highlighting the responsibility of states to safeguard academic freedom.
+
+```{r time_series}
+#| label: fig-averages_plot
+#| fig-cap: "AFI, Global and Regional Averages, 1960--2025 (right-hand side: population-weighted). Population data from the World Development Indicators."
+#| echo: FALSE
+#| warning: FALSE
+#| fig.height: 8
+#| fig.width: 12
+#| fig.align: "center"
+#| out.width: "100%"
+#| fig.pos: "H"
+
+cowplot::plot_grid(
+ f1+  f2)
+```
+
+```{r time_series saving, echo= FALSE, include = FALSE}
+
+cowplot::plot_grid(
+ f1+  f2)
+
+# Step 2: Save the plot
+ggsave(
+  filename = "figs/combined_plot_region.png", 
+  width = 15,           # adjust width
+  height = 8,           # adjust height
+  dpi = 600)
+```
+
+All dimensions of academic freedom are now declining in more countries than those in which they are improving (see @fig-countries above).
+
+In the period 2015–2025, several countries have experienced substantial and significant declines[^3] in all dimensions of academic freedom, especially in the freedom to research and teach (`r toString(v2cafres_negative)` countries), campus integrity (`r toString(v2casurv_negative)` countries), the freedom of academic exchange (`r toString(v2cafexch_negative)` countries), and the freedom of academic and cultural expression (`r toString(v2clacfree_negative)` countries). Institutional autonomy remains slightly more resistant to decline than the other dimensions, with `r toString(v2cainsaut_negative)` countries experiencing a substantial and statistically significant decline. By contrast, improvements are comparatively rare, although they are observable in some countries, such as Bahrain, The Gambia, and Uzbekistan.
+
+[^3]: A substantial decline or increase occurs if it is ≥ 0.1; statistically significant if the uncertainty intervals do not overlap.
+
+Overall, the post-2015 period is characterized by considerable declines across all five dimensions of academic freedom. Although institutional autonomy is slightly less affected than the other components of academic freedom, there are strong reasons for concern regarding attacks on institutional autonomy.
+
+## The Peril of Undermining Institutional Autonomy
+
+Our data suggests that institutional autonomy plays a key role in protecting individual-level dimensions of academic freedom: countries with greater institutional autonomy provide greater protection for individual scholars' freedom.
+
+Institutional autonomy refers to the degree to which higher education institutions are able to govern themselves without undue interference from the state or other external, non-academic actors. According to the 1997 UNESCO Recommendation concerning the Status of Higher-Education Teaching Personnel, autonomy is "that degree of self-governance necessary for effective decision making by institutions of higher education regarding their academic work, standards, management and related activities consistent with systems of public accountability, especially in respect of funding provided by the state, and respect for academic freedom and human rights."[@unesco_1997, 7]
+
+Importantly, institutional autonomy does not imply complete independence from the state. Rather, it denotes a protected sphere of decision-making within a broader legal and regulatory framework. While universities operate under public law and may rely on public funding, institutional autonomy allows them to exercise core educational and scientific functions free from undue state, political, or societal control or coercion.
+
+Institutional autonomy occupies a central position in the protection of academic freedom. The aforementioned 1997 UNESCO Recommendation recognizes it as "a necessary precondition to guarantee the proper fulfillment of the functions entrusted to higher-education teaching personnel and institutions."[@unesco_1997] Similarly, the United Nations Committee on Economic, Social and Cultural Rights, states that the “enjoyment of academic freedom requires the autonomy of institutions of higher education”. [@cescr_1999] Similar principles are also articulated in constitutional jurisprudence. For example, the German Federal Constitutional Court, in its landmark *Hochschulurteil*, grounds academic freedom under Article 5(3) of the Basic Law, guaranteeing institutional self-governance and reasoning that individual academic freedom would be illusory if universities lacked sufficient institutional autonomy.[@BVerfGE35_79]
+
+Academic scholarship has advanced several theoretical arguments about why the effective protection of individual academic freedoms, such as freedom of research, teaching, and academic expression, depends fundamentally on the autonomy of universities as collective actors.[@King2015; @lyer_2023; @spannagel_2025] Autonomous institutions are better equipped to resist political pressure, safeguard merit-based appointments, and provide organizational shelter for scholars whose work might challenge prevailing political or ideological interests. Conversely, when institutional autonomy is weak, governments can exert indirect control through leadership appointments, conditional funding, or restrictions on operational decision-making in admissions, hiring of academic staff, and research content, thereby undermining academic freedom even without overt repression.[@turk_2014]
+
+```{r correlation, include=FALSE}
+
+# Filter 2000-2025 and compute country-level means
+vdem_avg <- vdem %>%
+  filter(year >= 2000 & year <= 2025) %>%
+  group_by(country_name) %>%
+  summarise(
+    v2cainsaut_osp = mean(v2cainsaut_osp, na.rm = TRUE),
+    v2cafres_osp   = mean(v2cafres_osp, na.rm = TRUE),
+    .groups = "drop")
+
+# Pearson's correlation
+cor_test <- cor.test(vdem_avg$v2cainsaut_osp, vdem_avg$v2cafres_osp)
+
+# Extract correlation coefficient and p-value
+cor_value <- cor_test$estimate
+p_value <- cor_test$p.value
+
+# Create label
+cor_label <- paste0("Pearson's correlation = ", round(cor_value, 2))
+
+annot_df_y <- data.frame(
+  x = c(0.075, 0.075),                
+  y = c(0.15, 3.85),              
+  label = c("\u2190 Completely restricted", "Fully free \u2192"),
+  hjust = c(0, 1)
+)
+
+annot_df_x <- data.frame(
+  x = c(0.15, 03.85),                
+  y = c(0.075, 0.075), 
+    label = c("\u2190 No Institutional Autonomy", "Complete Institutional Autonomy \u2192"),
+  hjust = c(0, 1)
+)
+
+# Plot
+plot_correlation <- ggplot(vdem_avg, 
+                           aes(x = v2cainsaut_osp, 
+                               y = v2cafres_osp)) +
+
+    geom_point(size = 1) +
+  
+    geom_smooth(method = "lm", 
+                formula = y~x, 
+                se = TRUE, 
+                linetype = "dashed", 
+                color = "#920050", 
+                fill = alpha("#920050", 0.2)) +
+  
+    geom_text(aes(x = 1.5, 
+                  y = 3.5, 
+                  label = cor_label),
+              inherit.aes = FALSE,
+              color = "#920050", 
+              size = 6) +
+  
+    coord_cartesian(xlim = c(0, 4), ylim = c(0, 4), expand = FALSE) +
+  
+    scale_x_continuous(breaks = 0:4, labels = c("", 1:4)) +
+    scale_y_continuous(breaks = 0:4) +
+  
+    labs(
+      x = "Institutional Autonomy",
+      y = "Freedom to Research and Teach") +
+  
+   geom_text(
+    data = annot_df_y,
+    aes(x = x, y = y, label = label, hjust = hjust),
+    inherit.aes = FALSE,
+    size = 5,                    
+    fontface = "plain",
+    color = "black", 
+    angle = 90
+  ) +
+  
+  geom_text(
+    data = annot_df_x,
+    aes(x = x, y = y, label = label, hjust = hjust),
+    inherit.aes = FALSE,
+    size = 5,                    
+    fontface = "plain",
+    color = "black" ) +
+  
+  theme_pubr() + 
+   theme(
+    panel.grid.major.y = element_line(linetype = "dotted", color = "grey"),
+    panel.grid.major.x = element_line(linetype = "dotted", color = "grey"),
+    axis.text = element_text(margin = margin(t = 5, r = 5), size=14), 
+    axis.title = element_text(size = 16),
+    axis.ticks.x.top = element_blank(), 
+    axis.ticks.y.right = element_blank(),
+    legend.position="bottom", 
+    legend.key.size = unit(2, 'cm'), 
+    legend.key.height = unit(2, 'cm'), 
+    legend.key.width = unit(2, 'cm'), 
+    legend.title = element_text(size=8), 
+    legend.text = element_text(size=8))
+```
+
+```{r scatterplot, include = TRUE}
+#| label: fig-correlations
+#| echo: false
+#| warning: false
+#| fig-height: 7
+#| fig-width: 7
+#| fig-align: center
+#| out-width: "70%"
+#| fig-pos: "H"
+#| fig-cap: "The Relationship Between Institutional Autonomy (x-axis) and Freedom to Research and Teach (y-axis), 2000–2025. The points represent individual countries, and the \\textcolor[HTML]{920050}{dashed line} shows the linear trend for the relationship. Pearson’s correlation is calculated using complete observations only."
+
+plot_correlation
+```
+
+A rival argument posits that in recent years higher education institutions have become a *locus* where hegemonic, typically liberal attitudes, norms, and cultural values dominate through the silencing of critical and dissenting voices, thereby limiting freedom of speech, entrenching intellectual exclusion, and eroding tolerance and pluralism.[@norris_2025] From this standpoint, a perceived "liberal hegemony" in higher education creates a climate in which scholars holding heterodox or conservative viewpoints feel reluctant to speak openly for fear of social sanction, reputational harm, or career penalties.[@lukianoff_2023; @nierman_2023] In this argument, the threat to academic freedom is less about direct state intervention or formal administrative control, and more about informal social pressures that induce self-censorship and suppress viewpoint diversity.[@norris_2025]
+
+The AFI data allow us to empirically evaluate these theoretical arguments. @fig-correlations displays the relationship between institutional autonomy and freedom to research and teach across 179 countries, averaged over the period 2000–2025.[^4] The results indicate a very strong and statistically significant positive correlation between institutional autonomy and freedom to research and reach (r= `r toString(round(cor_value, 2))`).[^5]
+
+[^4]: We used the version \_osp of all variables from the Varieties of Democracy (V-Dem) dataset v-16. This version of the variable translates the measurement model point estimates back to the original ordinal scale of each variable (i.e., 0–4) as an interval measure.
+
+[^5]: The Pearson correlation is statistically significant at the 0.001 level.
+
+These findings reveal that institutional autonomy is positively associated with individual dimensions of academic freedom, and suggests that more autonomous higher education institutions provide more robust safeguards for individual academics' freedom. When institutional autonomy is undermined, higher education institutions and individual scholars become more exposed to external pressures, ranging from economic constraints to political and ideological restrictions.
+
+## Institutional Autonomy around the World and in the West
+
+As of 2022, constitutional protections for university autonomy are widespread in Latin America, Central Asia, and Eastern and Western Europe.[@spannagel_2025] However, *de jure* protection does not always ensure *de facto* protection, and in recent years, the condition of institutional autonomy has begun to deteriorate in many countries, predominately located in Europe, North America, and Latin America.
+
+```{r bubble chart, include=FALSE}
+
+# Using osp_variables
+
+vdem_subset <- vdem %>%
+  ungroup() %>%
+    filter(year %in% c(2015, 2025)) %>%
+  select(
+    country_name, country_text_id, year,
+    v2cainsaut_osp,
+    v2cainsaut_osp_codelow, 
+    v2cainsaut_osp_codehigh,
+    e_regionpol_6C, 
+    e_wb_pop) %>%
+  mutate(e_regionpol_6C = case_when(e_regionpol_6C ==1 ~ "Eastern Europe\nand Central Asia", 
+                                    e_regionpol_6C ==2 ~ "Latin America\nand the Caribbean", 
+                                    e_regionpol_6C ==3 ~ "The Middle East\nand North Africa", 
+                                    e_regionpol_6C ==4 ~ "Sub-Saharan\nAfrica", 
+                                    e_regionpol_6C ==5 ~ "Western Europe\nand North America", 
+                                    e_regionpol_6C ==6 ~ "Asia and\nthe Pacific"))
+
+
+vdem_subset_point <- vdem_subset %>%
+  select(country_text_id, country_name, year, 
+         v2cainsaut_osp,
+         e_regionpol_6C) %>%
+  pivot_wider(names_from = year, 
+              values_from = v2cainsaut_osp,  
+              names_prefix = "v2cainsaut_") 
+
+vdem_subset_codelow <- vdem_subset %>%
+  select(country_text_id, country_name, year, 
+         v2cainsaut_osp_codelow,
+         e_regionpol_6C) %>%
+  pivot_wider(names_from = year, 
+              values_from = v2cainsaut_osp_codelow,  
+              names_prefix = "v2cainsaut_codelow") %>%
+  select(-c("country_name", "e_regionpol_6C"))
+
+
+vdem_subset_codehigh <- vdem_subset %>%
+  select(country_text_id, country_name, year, 
+         v2cainsaut_osp_codehigh,
+         e_regionpol_6C) %>%
+  pivot_wider(names_from = year,
+              values_from = v2cainsaut_osp_codehigh,
+              names_prefix = "v2cainsaut_codehigh") %>%
+  select(-c("country_name", "e_regionpol_6C"))
+
+
+vdem_subset_2025_pop_est <- vdem_subset %>%
+  filter(year == 2025) %>%
+  select(country_text_id, e_wb_pop)
+
+vdem_subset <- vdem_subset_point %>%
+  left_join(vdem_subset_codelow, by = c("country_text_id")) %>%
+  left_join(vdem_subset_codehigh, by = c("country_text_id")) %>%
+  left_join(vdem_subset_2025_pop_est, by = c("country_text_id")) %>%
+  mutate(diff_2015_2025 = 0) %>% 
+  mutate(
+    diff_2015_2025 = ifelse(
+      v2cainsaut_codelow2025 > v2cainsaut_codehigh2015 & v2cainsaut_2025 - v2cainsaut_2015> 0.1, 1, 0), 
+    
+    diff_2015_2025 = ifelse(
+      v2cainsaut_codehigh2025 < v2cainsaut_codelow2015 & v2cainsaut_2025 - v2cainsaut_2015 < -0.1, 1, diff_2015_2025)) %>%
+  
+  mutate(
+    diff_2015_2025_pos_neg = ifelse(v2cainsaut_codelow2025 > v2cainsaut_codehigh2015 & v2cainsaut_2025 - v2cainsaut_2015> 0.1, "positive", 0), 
+    diff_2015_2025_pos_neg = ifelse(v2cainsaut_codehigh2025 < v2cainsaut_codelow2015 & v2cainsaut_2025 - v2cainsaut_2015 < -0.1, "negative", diff_2015_2025_pos_neg))
+
+table(vdem_subset$diff_2015_2025_pos_neg)
+
+###
+countries_decliners_2015_2025 <- vdem_subset$country_name[
+  vdem_subset$diff_2015_2025_pos_neg == "negative" & !is.na(vdem_subset$diff_2015_2025_pos_neg )]
+
+countries_increasers_2015_2025 <- vdem_subset$country_name[
+  vdem_subset$diff_2015_2025_pos_neg == "positive" & !is.na(vdem_subset$diff_2015_2025_pos_neg)]
+
+
+countries_decliners_2015_2025
+
+countries_increasers_2015_2025
+
+vdem_subset <- vdem_subset %>%
+ mutate(e_wb_pop = ifelse(country_name == "Taiwan", 23347374, 
+                           ifelse(country_name == "Palestine/Gaza", 2375259, 
+                                  ifelse(country_name == "Somaliland", 5741086, 
+                                         ifelse(country_name == "Zanzibar", 800010, 
+                                                ifelse(country_name == "Kosovo", 1761864, e_wb_pop)))))) %>%
+  mutate(e_wb_pop = e_wb_pop /1000000) %>%
+  mutate(country_name = ifelse(country_name == "United States of America", "USA", country_name))
+
+table(vdem_subset$diff_2015_2025)
+summary(vdem_subset$e_wb_pop)
+
+
+
+# Plot 
+cols <- c("Eastern Europe\nand Central Asia" = "#666666",
+          "Latin America\nand the Caribbean" = "#7685A6", 
+          "The Middle East\nand North Africa" = "#FFB81C", 
+          "Sub-Saharan\nAfrica" = "#002F6C", 
+          "Western Europe\nand North America" = "#E87722", 
+          "Asia and\nthe Pacific" = "#0A5F4B")
+
+#Hilight selected columns
+highlight_filter <- 
+  vdem_subset$diff_2015_2025 == 1 &
+  vdem_subset$v2cainsaut_2025 < vdem_subset$v2cainsaut_2015 &   # below diagonal
+  vdem_subset$v2cainsaut_2015 >= 3 &
+  vdem_subset$v2cainsaut_2015 <= 4
+
+annot_df_y <- data.frame(
+  x = c(0.05, 0.05),                
+  y = c(0.15, 3.85),              
+  label = c("\u2190 No Institutional Autonomy", "Complete Institutional Autonomy \u2192"),
+  hjust = c(0, 1)
+)
+
+annot_df_x <- data.frame(
+  x = c(0.15, 03.85),                
+  y = c(0.05, 0.05),              
+  label = c("\u2190 No Institutional Autonomy", "Complete Institutional Autonomy \u2192"),
+  hjust = c(0, 1)
+)
+
+
+bubble_chart <- ggplot(vdem_subset, 
+                       aes(x = v2cainsaut_2015, y = v2cainsaut_2025, color = e_regionpol_6C)) +
+  
+  geom_point(aes(size = e_wb_pop), alpha = 0.2) +
+  
+  geom_point(
+    data = subset(vdem_subset, highlight_filter),
+    aes(size = e_wb_pop),
+    alpha = 0.7) +
+  
+  geom_text_repel(
+    data = subset(vdem_subset, highlight_filter),
+    aes(label = country_name),
+    show.legend = FALSE,   
+    force = 2,
+    force_pull = 2,
+    seed = 123) +
+  
+  scale_size(range = c(2, 40), name = "Population (M)") +
+  geom_abline(intercept = 0, slope = 1, linewidth = 0.5) +
+  scale_x_continuous(
+    name = "Institutional Autonomy 2015",
+    limits = c(0,4)
+  ) +
+  scale_y_continuous(
+    name = "Institutional Autonomy 2025",
+    limits = c(0,4)
+  ) +
+  geom_text(
+    data = annot_df_y,
+    aes(x = x, y = y, label = label, hjust = hjust),
+    inherit.aes = FALSE,
+    size = 5,                    
+    fontface = "plain",
+    color = "black", 
+    angle = 90
+  ) +
+  geom_text(
+    data = annot_df_x,
+    aes(x = x, y = y, label = label, hjust = hjust),
+    inherit.aes = FALSE,
+    size = 5,                    
+    fontface = "plain",
+    color = "black" ) +
+  theme_pubr() +
+  scale_color_manual("", values = cols) +
+  labs(
+    color = "",
+    size = "") +
+  
+  theme(
+    panel.grid.major.y = element_line(linetype = "dotted", color = "grey"),
+    panel.grid.major.x = element_line(linetype = "dotted", color = "grey"),
+    axis.text = element_text(margin = margin(t = 5, r = 5), size=15), 
+    axis.title = element_text(size = 16),
+    axis.ticks.x.top = element_blank(), 
+    axis.ticks.y.right = element_blank(),
+    legend.position="bottom", 
+    legend.key.size = unit(2, 'cm'), 
+    legend.key.height = unit(2, 'cm'), 
+    legend.key.width = unit(2, 'cm'), 
+    legend.title = element_text(size=16), 
+    legend.text = element_text(size=16)) +
+  
+  guides(
+    size = "none", 
+    color = guide_legend(override.aes = list(size = 7), nrow = 2))
+
+# Countries specifically highlighted (larger alpha and labels in plot)
+countries_highlighted <- vdem_subset$country_name[highlight_filter]
+countries_highlighted <- countries_highlighted[!is.na(countries_highlighted)]
+
+total_countries_highlighted <- length(countries_highlighted)
+
+countries_highlighted
+total_countries_highlighted
+
+# List of countries (declining or increasing) for institutional autonomy
+v2cainsaut_negative_countries <- results_all %>%
+  filter(indicator == "v2cainsaut_osp", significant == "negative") %>%
+  select(country_text_id, country_name)
+
+v2cainsaut_positive_countries <- results_all %>%
+  filter(indicator == "v2cainsaut_osp", significant == "positive") %>%
+  select(country_text_id, country_name)
+
+v2xca_academ_positive_countries <- results_all %>%
+  filter(indicator == "v2xca_academ", significant == "positive") %>%
+  select(country_text_id, country_name)
+
+#countries_decliners <- v2cainsaut_negative_countries$country_name
+#countries_decliners
+#countries_increasers <- v2cainsaut_positive_countries$country_name
+#countries_increasers
+```
+
+@fig-bubble_plot illustrates that between 2015 and 2025, `r toString(v2cainsaut_negative)` countries across different regions experienced a substantive and statistically significant decline in institutional autonomy. In `r toString(total_countries_highlighted)` of these `r toString(v2cainsaut_negative)` cases, institutional autonomy was very well protected in 2015. These include countries primarily located in Europe, such as Austria, Poland, Portugal, the Netherlands, Slovakia, and Switzerland; North America, including Canada and the United States; and Latin America, for instance Argentina, Bolivia, El Salvador, and Peru. This pattern could be interpreted as indicative of a broader trend of declining university autonomy in liberal democratic countries.
+
+To illustrate this pattern, @fig-bubble_plot highlights only those countries where institutional autonomy was very well protected in 2015 (scores between 3 and 4) but declined significantly over the last decade. Overall, AFI data reveal substantial and statistically significant increases in institutional autonomy in only `r toString(v2cainsaut_positive)` countries over the same period, predominantly in Asia, for example Bahrain, Laos, Maldives, and Uzbekistan, and other regions including Europe (North Macedonia, Montenegro), Sub-Saharan Africa (Democratic Republic of the Congo, The Gambia), and Central America (Panama).
+
+```{r bubble_plot, include = TRUE}
+#| label: fig-bubble_plot
+#| echo: false
+#| warning: false
+#| fig-height: 10
+#| fig-width: 10
+#| fig-align: center
+#| out-width: "95%"
+#| fig-pos: "H"
+#| fig-cap: "Increasing and Decreasing Scores for Institutional Autonomy, 2015–2025. Institutional autonomy increased in countries and territories above the diagonal line and decreased in countries and territories below it. Countries and territories are labelled if their scores in 2015 are between 3 and 4. The size of the dots indicates the population size of the countries/territories in 2024 (data from World Bank’s World Development Indicators)."
+
+bubble_chart
+```
+
+```{r bubble_plot_saving, include = FALSE}
+
+# Save the plot
+ggsave(
+  filename = "figs/bubble_chart_selected.jpeg", 
+  plot = bubble_chart,    # the variable you just created
+  width = 15,           # adjust width
+  height = 12,           # adjust height
+  dpi = 300)
+```
+
+This evidence points to a concentration of declines in institutional autonomy in Western countries, particularly in democratic regimes, while positive changes remain relatively rare and concentrated among a small set of countries.
+
+## Steep Decline of Institutional Autonomy in the United States
+
+The decline in academic freedom in the United States began around 2020, largely fueled by state-level actions in several states, and mostly undertaken by officials aligned with the MAGA movement. In 2025, under the second Trump Administration, attacks on academic freedom at the state level intensified, supported by an array of federal measures. These attacks undermine not only individual-level freedoms by targeting faculty members, staff, and students, but also and more prominently, the autonomy of higher education institutions.[@SAR_FreeToThink_2025] Political interference in university governance, curricular decisions, hiring practices, and research agendas has increasingly become a feature of contemporary US higher education.[^6]
+
+[^6]: American Association of University Professors (AAUP), "Statement of Political Interference in Higher Education" (2024), <https://www.aaup.org/reports-publications/aaup-policies-reports/policy-statements/statement-political-interference>
+
+While "the problems facing higher education today \[in the US\] are not new and stem from ill-conceived policies developed and implemented on a bi-partisan basis,"[^7] federal actions escalated in 2025 to concrete interventions targeting the autonomy of universities. Such actions include efforts to politicize accreditation,[^8] condition federal funding on compliance with government demands,[^9] and leverage research support to influence admissions, hiring, and governance practices at institutions.[^10] This political strategy culminated in high-profile confrontations with Ivy League universities in early 2025,[^11] and prompted multiple lawsuits alleging unconstitutional interference with institutional autonomy.[^12]
+
+[^7]: American Association of University Professors (AAUP), "AAUP after the 2016 Election" (2016), <https://academeblog.org/2016/11/09/aaup-after-the-2016-election/>
+
+[^8]: @whitehouse_2025_accreditation; American Federation of Teachers, "AFT and AAUP Trump’s Executive Order on Accreditation Opens the Door for Rampant Corruption and Political Interference in Academic Institutions", (2025) <https://www.aft.org/press-release/aft-and-aaup-trumps-executive-order-accreditation-opens-door-rampant-corruption-and>
+
+[^9]: The New York Times, "Trump Administration Freezes \$1 Billion for Cornell and \$790 Million for Northwestern, Officials Say" (2025), <https://www.nytimes.com/2025/04/08/us/politics/cornell-northwestern-university-funds-trump.html>
+
+[^10]: Compact for Academic Excellence in Higher Education (2025) <https://www.washingtonexaminer.com/wp-content/uploads/2025/10/Compact-for-Academic-Excellence-in-Higher-Education-10.1.pdf>
+
+[^11]: The New York Times, "Trump vs. Harvard: Inside the president’s battle with the university" (2025), <https://www.nytimes.com/2025/05/28/briefing/harvard-trump-funding.html>
+
+[^12]: Financial Times, "Professors sue Trump administration over Columbia University overhaul" (2025), <https://www.ft.com/content/d95c5fe9-20cd-4741-bd54-4f733d30172b>
+
+Overall, both state and federal attacks have generated severe pressure on American universities. The termination or freezing of thousands of federal research grants, mostly targeting top universities, along with federal anti-diversity, equality, and inclusion (DEI) directives[^13] and state-level legislative actions,[^14] has directly constrained higher education institutions' capacity to set independent research priorities and to sustain long-term academic programs. Proposed budget reductions of up to 35 % — amounting to approximately US \$32 billion — further intensify this pressure by compelling universities to reallocate internal resources, curtail research lines, particularly in fields such as gender studies and environmental justice, and align institutional strategies with short-term political and fiscal considerations.[@Kozlov_Tollefson_Garisto_2026]
+
+[^13]: @whitehouse_illegal_discrimination_2025
+
+[^14]: @sar_2025_01_14; @sar_2025_03_27; @sar_2025_03_28; @sar_2025_04_04
+
+```{r peers_us, include = FALSE}
+
+peers_us_data <- vdem %>% 
+  filter(e_regionpol_6C == 5) %>%
+  mutate(peers_helper = ifelse(country_text_id == "USA", "USA", 
+                               "Average Peer Country")) %>%
+  group_by(peers_helper, year) %>%
+  summarize(v2cainsaut_osp = mean(v2cainsaut_osp, na.rm = T), 
+            v2cainsaut_osp_codelow = mean(v2cainsaut_osp_codelow, na.rm = T), 
+            v2cainsaut_osp_codehigh = mean(v2cainsaut_osp_codehigh, na.rm = T)) %>%
+  filter(year >=2015)
+  
+
+#color
+afi_color_helper <- c("#920050", "#002F6C")
+
+#Lateral notes
+annot_df_y <- data.frame(
+  x = c(2013.5, 2013.5),
+  y = c(0.15, 3.85),
+  label = c("\u2190 No Institutional Autonomy",
+            "Complete Institutional Autonomy \u2192"),
+  hjust = c(0, 1))
+
+peers_us_data$peers_helper <- factor(peers_us_data$peers_helper, 
+                                        levels = c("USA","Average Peer Country"))
+
+
+positions_label <- rep(c(0.2, 0.95), each = length(unique(peers_us_data$year)))
+
+# ---- Plot ----
+peers_us_plot <- ggplot(peers_us_data,
+                       aes(x = year,
+                           y = v2cainsaut_osp,
+                           color = peers_helper,
+                           fill = peers_helper)) +
+
+  geom_ribbon(aes(ymin = v2cainsaut_osp_codelow,
+                  ymax = v2cainsaut_osp_codehigh),
+              alpha = 0.15,
+              color = NA) +
+
+  geom_textline(
+    aes(label = peers_helper, 
+        linetype = peers_helper),
+    hjust = positions_label,
+    linewidth = 1.2,
+    text_smoothing = 50,
+    size = 5,
+    fontface = "bold",
+    vjust = -0.3,
+    gap = FALSE) +
+
+    geom_text(data = annot_df_y,
+            aes(x = x, y = y, label = label, hjust = hjust),
+            inherit.aes = FALSE,
+            size = 5,
+            color = "black",
+            angle = 90) +
+
+  theme_pubclean() +
+
+  scale_y_continuous(
+    name = "Institutional Autonomy",
+    breaks = c(0,1,2,3,4),
+    limits = c(0,4)) +
+
+  scale_x_continuous(
+    name = "Year",
+    limits = c(2013.5, 2025),
+    breaks = seq(2015, 2025, 2)) +
+
+  scale_colour_manual(values = afi_color_helper) +
+  scale_fill_manual(values = afi_color_helper) +
+
+  labs(color = "",
+       fill = "",
+       linetype = "") +
+
+  theme(legend.position = "none", 
+        axis.text = element_text(margin = margin(t = 5, r = 5), size=16), 
+        axis.title = element_text(size = 20))
+
+percent_decline_us <- peers_us_data$v2cainsaut_osp[peers_us_data$peers_helper == "USA" & peers_us_data$year == 2025] / peers_us_data$v2cainsaut_osp[peers_us_data$peers_helper == "USA" & peers_us_data$year == 2015]
+
+USA_2019_insaut <- peers_us_data$v2cainsaut_osp[peers_us_data$peers_helper == "USA" & peers_us_data$year == 2020]
+
+USA_2025_insaut <- peers_us_data$v2cainsaut_osp[peers_us_data$peers_helper == "USA" & peers_us_data$year == 2025]
+
+```
+
+@fig-peers_us compares the average trajectory of institutional autonomy in Western Europe and North America[^15] with the trajectory of institutional autonomy in the United States between 2015 and 2025. It shows that the regional average level of institutional autonomy has deteriorated only marginally, now ranking slightly below the substantial institutional autonomy category.[^16] In contrast, the decline in the United States has been more rapid and pronounced, particularly in the last year. It has deteriorated by `r toString(scales::label_percent(accuracy = NULL, suffix = "%")(percent_decline_us))` from 2015 to 2025 and is now evaluated as moderate autonomy by country experts.
+
+[^15]: In line with the V-Dem Codebook, Western Europe and North America also include Cyprus, Australia, and New Zealand. For the calculation of the country averages, the United States of America is excluded. See @coppedge_vdem_2026 [400]
+
+[^16]: Institutional autonomy is measured on an ordinal scale ranging from 0 to 4, where 0 indicates no autonomy, 1 minimal autonomy, 2 moderate autonomy, 3 substantial autonomy, and 4 complete autonomy.
+
+```{r peers_us_plot, include = TRUE}
+#| label: fig-peers_us
+#| echo: false
+#| warning: false
+#| fig-height: 8
+#| fig-width: 10
+#| fig-align: center
+#| out-width: "95%"
+#| fig-pos: "H"
+#| fig-cap: "Institutional Autonomy, Development for the \\textbf{\\textcolor[HTML]{920050}{US}} and the \\textbf{\\textcolor[HTML]{002F6C}{Average Peer Country in Western Europe and North America}} from 2015 to 2025."
+
+peers_us_plot 
+
+
+```
+
+```{r peer_saving, include = FALSE}
+
+# Save the plot
+ggsave(
+  filename = "figs/fig-peers_us.jpeg", 
+  plot = peers_us_plot,    
+  width = 12,           # adjust width
+  height = 9,           # adjust height
+  dpi = 300)
+
+```
+
+@fig-cases compares the decline of institutional autonomy in the United States with its decline in other prominent (former) democracies that have autocratized, namely Hungary, India, and Türkiye.[^17] It shows that the decline in institutional autonomy in the United States over 2019–2025[^18] has been both rapid and pronounced, falling from `r toString(round(USA_2019_insaut, 1))` in 2019 to `r toString(round(USA_2025_insaut, 1))` in 2025. The steep decline in the US case, concentrated within a relatively short six-year period, shows how quickly political and administrative pressures can erode institutional autonomy. Other countries with relatively high scores for academic freedom and democracy which have lately experienced consistent declines, such as Hungary, India, and Türkiye, have also experienced substantial and statistically significant declines, as political attacks, legal reforms, and administrative interventions have gradually undermined the autonomy of higher education institutions. Compared to the US, however, these have occurred over longer periods and with different magnitudes.
+
+[^17]: @fig-cases reports the start and (censored) end years of episodes of decline in academic freedom, according to the data from @lott2024, but updated with the V-Dem v16 data.
+
+[^18]: Academic freedom in the United States began to decline in 2020. @fig-cases includes data from 2019 to provide a baseline for comparison.
+
+```{r countries declines and episodes, include=FALSE}
+
+# Countries with significant declines 
+
+# Filter for significant declines in academic freedom 
+decline_countries_academic <- results_all %>%
+  filter(significant == "negative") %>%
+  filter(indicator %in% c("v2xca_academ")) %>%
+  select(
+      country_id,
+      country_name,
+      country_text_id,
+    indicator,
+    v2xca_academ_2015,  # academic freedom 2015
+    v2xca_academ_2025,  # academic freedom 2025
+    delta) %>%
+  arrange(indicator, country_name)
+
+# Filter for significant declines in both academic freedom and institutional autonomy 
+decline_countries_aca_inst <- results_all %>%
+  filter(significant == "negative") %>%
+  filter(indicator %in% c("v2xca_academ", "v2cainsaut_osp")) %>%
+  select(
+      country_id,
+      country_name,
+      country_text_id,
+    indicator,
+    v2xca_academ_2015,  # academic freedom 2015
+    v2xca_academ_2025,  # academic freedom 2025
+    v2cainsaut_osp_2015, # institutional autonomy 2015
+    v2cainsaut_osp_2025, # institutional autonomy 2025
+    delta) %>%
+  arrange(indicator, country_name)
+
+# Optional: check the number of countries per indicator
+table(decline_countries_aca_inst$indicator)
+
+
+# 6. Identify countries with declines in both academic freedom and institutional autonomy 
+decline_wide <- decline_countries_aca_inst %>%
+  pivot_wider(
+    id_cols = c(country_id, country_name, country_text_id),
+    names_from = indicator,
+    values_from = c(v2xca_academ_2015, v2xca_academ_2025,
+                    v2cainsaut_osp_2015, v2cainsaut_osp_2025, delta))
+
+# Keep only countries that have declines in both indicators
+decline_both <- decline_wide %>%
+  filter(!is.na(delta_v2cainsaut_osp) & !is.na(delta_v2xca_academ)) %>%
+  select (country_id, country_text_id,delta_v2xca_academ, delta_v2cainsaut_osp)
+
+```
+
+```{r declines, include=FALSE, echo=FALSE}
+
+episode_data_v16 <- episode_data %>%
+  dplyr::select(-c(country_id, country_name, starts_with("v2xca_academ")))
+
+episode_data_v16_wo_uncer <- episode_data_wo_uncer %>%
+  dplyr::select(-c(country_id, country_name, starts_with("v2xca_academ")))
+
+
+#---------------------------------------------------#
+#--------------- Decline Episodes-------------------#
+#---------------------------------------------------#
+
+vdem2 <- vdem %>%
+  left_join(episode_data_v16, by = c("country_text_id", "year"))
+
+decline_episode_data <- vdem2 %>%
+  group_by(country_name) %>%
+  filter(decline_episode == 1 | lead(decline_episode == 1)) %>%
+  mutate(decline_episode_id = ifelse(is.na(decline_episode_id), lead(decline_episode_id), decline_episode_id)) %>%
+  group_by(decline_episode_id) %>%
+  mutate(time_since_start = year - first(year))%>%
+  arrange(country_name)
+
+## 154 unique episodes ##
+#length(unique(decline_episode_data$decline_episode_id))
+
+decline_episode_data_2015<- decline_episode_data%>%
+  filter (year>=2015)%>%
+  select (country_name, country_text_id, country_id, year, 
+          starts_with("v2xca_academ"),
+          starts_with("v2cainsaut"),
+          decline_episode, decline_episode_id, decline_sum, decline_episode_start_year, decline_episode_end_year, 
+          decline_episode_censored)
+# 65 unique episodes (from 2015 to 2025)
+#length(unique(decline_episode_data$decline_episode_id))
+
+
+# Create episode ID 
+academic_decline_episodes <- decline_episode_data %>%
+  filter(year >= 2015, decline_episode == 1) %>%
+  
+  distinct(
+    country_name,
+    country_text_id,
+    decline_episode_start_year,
+    decline_episode_end_year,
+    .keep_all = TRUE) %>%
+  
+  mutate(
+    start_year = decline_episode_start_year,
+    end_year   = decline_episode_end_year,
+    decline_episode_id = paste(country_text_id, start_year, end_year, sep = "_")) %>%
+  select(
+    country_name,
+    country_text_id,
+    decline_episode_id,
+    start_year,
+    end_year,
+    decline_sum,
+    decline_episode_censored) %>%
+  arrange(country_name)
+
+```
+
+```{r compute change, include=FALSE}
+
+# Compute the change in institutional autonomy for the selected cases between the start and end of the decline episode 
+
+# Define the episodes you want to filter
+decline_episode_filter <- c(
+  "TUR_2010_2017",
+  "USA_2020_2025",
+  "IND_2013_2025",
+  "HUN_2010_2025"
+)
+
+# Compute change in institutional autonomy during decline episode
+institutional_autonomy_change <- decline_episode_data %>%
+  filter(decline_episode_id %in% decline_episode_filter) %>%
+  arrange(country_name, year) %>%   # ensure correct year ordering
+  group_by(decline_episode_id, country_name) %>%
+  summarise(
+    start_year  = min(year),
+    end_year    = max(year),
+    start_value = v2cainsaut_osp[year == start_year][1],
+    end_value   = v2cainsaut_osp[year == end_year][1],
+    change      = end_value - start_value,
+    .groups = "drop"
+  )
+
+# View results
+institutional_autonomy_change
+```
+
+```{r temporal institutional autonomy, include= FALSE}
+
+decline_episode_filter <- c("TUR_2010_2017", "USA_2020_2025", "IND_2013_2025", "HUN_2010_2025")
+country_filter <- c("TUR", "USA", "IND", "HUN")
+
+decline_data <- vdem2 %>%
+  filter(country_text_id %in% country_filter) %>%
+  filter(year >=2000)
+
+# Filter for AFI decline
+decline_data <- decline_data %>%
+  group_by(country_text_id) %>%
+  mutate(decline_episode_id = ifelse(lead(!is.na(decline_episode_id)), lead(decline_episode_id), decline_episode_id),
+         decline_episode_id = ifelse(decline_episode == 1,lag(decline_episode_id), decline_episode_id),
+         decline_episode = ifelse(!is.na(decline_episode_id), 1, decline_episode)) %>%
+  filter(decline_episode_id %in% decline_episode_filter)
+
+# Prepare episode time
+decline_data <- decline_data %>%
+  group_by(country_text_id) %>%
+  mutate(
+    start_year = min(year),
+    time = year - start_year) %>%
+  ungroup() %>%
+  mutate(country_name = ifelse(country_name == "United States of America", 
+                               "USA", country_name))
+
+# Start labels
+start_df <- decline_data %>%
+  group_by(country_text_id) %>%
+  slice_min(year, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(label = as.character(year)) %>%
+  select(country_text_id, time, label, v2cainsaut_osp)
+
+# End labels
+end_df <- decline_data %>%
+  group_by(country_text_id) %>%
+  slice_max(year, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(label = as.character(year)) %>%
+  select(country_text_id, time, label, v2cainsaut_osp)
+
+# Country-specific label positioning
+hjust_df <- data.frame(
+  country_text_id = unique(decline_data$country_text_id),
+  hjust = c(0.25, 0.95, 0.975, 0.1)[seq_along(unique(decline_data$country_text_id))])
+
+decline_data <- decline_data %>%
+  left_join(hjust_df, by = "country_text_id")
+
+unique(decline_data$country_text_id)
+
+#color
+afi_color_main <- c("#E87722","#002F6C", "#FFB81C", "#920050")
+
+
+#decline_data$country_text_id <- factor(decline_data$country_text_id, 
+ #                                       levels = c("USA", "IND", "HUN", "TUR"))
+
+
+#Lateral notes
+annot_df_y <- data.frame(
+  x = c(-1.5, -1.5),
+  y = c(0.15, 3.85),
+  label = c("\u2190 No Institutional Autonomy",
+            "Complete Institutional Autonomy \u2192"),
+  hjust = c(0, 1))
+
+
+# ---- Plot ----
+select_cases <- ggplot(decline_data,
+                       aes(x = time,
+                           y = v2cainsaut_osp,
+                           color = country_text_id,
+                           fill = country_text_id)) +
+
+  geom_ribbon(data = subset(decline_data, country_text_id == "USA"), 
+              aes(ymin = v2cainsaut_osp_codelow,
+                  ymax = v2cainsaut_osp_codehigh),
+              alpha = 0.3) +
+
+  geom_textline(data = subset(decline_data, country_text_id == "USA"), 
+    aes(label = country_name,
+        linetype = country_text_id,
+        hjust = hjust),
+    linewidth = 1.2,
+    text_smoothing = 50,
+    size = 4,
+    fontface = "bold",
+    vjust = -0.3,
+    gap = FALSE) +
+  
+  geom_ribbon(data = subset(decline_data, country_text_id != "USA"), 
+              aes(ymin = v2cainsaut_osp_codelow,
+                  ymax = v2cainsaut_osp_codehigh),
+              alpha = 0.10) +
+
+  geom_textline(data = subset(decline_data, country_text_id != "USA"), 
+    aes(label = country_name,
+        linetype = country_text_id,
+        hjust = hjust),
+    linewidth = 1,
+    alpha = 0.4,
+    text_smoothing = 50,
+    size = 4,
+    fontface = "bold",
+    vjust = -0.3,
+    gap = FALSE) +
+
+  geom_text(data = subset(start_df, country_text_id == "USA"),
+            aes(x = time,
+                y = v2cainsaut_osp,
+                label = label,
+                color = country_text_id),
+            hjust = 1.1,
+            size = 4.5,
+            show.legend = FALSE) +
+
+  geom_text(data = subset(end_df, country_text_id == "USA"),
+            aes(x = time,
+                y = v2cainsaut_osp,
+                label = label,
+                color = country_text_id),
+            hjust = -0.1,
+            size = 4.5,
+            show.legend = FALSE) +
+  
+  geom_text(data = subset(start_df, country_text_id != "USA"),
+            aes(x = time,
+                y = v2cainsaut_osp,
+                label = label,
+                color = country_text_id),
+            hjust = 1.1,
+            size = 2.6,
+            show.legend = FALSE) +
+
+  geom_text(data = subset(end_df, country_text_id != "USA"),
+            aes(x = time,
+                y = v2cainsaut_osp,
+                label = label,
+                color = country_text_id),
+            hjust = -0.1,
+            size = 2.6,
+            show.legend = FALSE) +
+
+  geom_text(data = annot_df_y,
+            aes(x = x, y = y, label = label, hjust = hjust),
+            inherit.aes = FALSE,
+            size = 5,
+            color = "black",
+            angle = 90) +
+
+  theme_pubclean() +
+
+  scale_y_continuous(
+    name = "Institutional Autonomy",
+    breaks = c(0,1,2,3,4),
+    limits = c(0,4)) +
+
+  scale_x_continuous(
+    name = "Years after the onset of the episode",
+    limits = c(-1.5, max(decline_data$time) + 1),
+    breaks = seq(0, max(decline_data$time), 2)) +
+
+  scale_colour_manual(values = afi_color_main) +
+  scale_fill_manual(values = afi_color_main) +
+  scale_linetype_manual(values = c("dashed", "dotted", "longdash", "solid")) +
+  labs(color = "",
+       fill = "",
+       linetype = "") +
+
+  theme(legend.position = "none", 
+        axis.text = element_text(margin = margin(t = 5, r = 5),
+                                 size=16), 
+        axis.title = element_text(margin = margin(15, 15, 15, 15), size = 20))
+```
+
+```{r cases_plot, include = TRUE}
+#| label: fig-cases
+#| echo: false
+#| warning: false
+#| fig-height: 8
+#| fig-width: 10
+#| fig-align: center
+#| out-width: "95%"
+#| fig-pos: "H"
+#| fig-cap: "Timing of Academic Freedom Decline Episodes in the \\textbf{\\textcolor[HTML]{920050}{United States of America}} (2020–2025),  \\textbf{\\textcolor[HTML]{E87722}{Hungary}} (2010–2025), \\textbf{\\textcolor[HTML]{002F6C}{India}} (2013–2025), \\textbf{\\textcolor[HTML]{FFB81C}{Türkiye}} (2010–2017). Lines display changes in the Institutional Autonomy indicator starting one year before the onset of each episode (t = 0). Shaded ribbons represent uncertainty intervals. Start and end years are indicated at the beginning and end of each episode."
+
+select_cases
+```
+
+Notwithstanding these findings regarding the decline of institutional autonomy in the United States, resistance has emerged through legal and institutional pushback. Recent court rulings have rejected imposed limits on research funding — such as the attempt by the National Institutes of Health to cap overhead reimbursement. The rulings have affirmed the illegitimacy of politically motivated constraints and resulted in the reinstatement of the majority of previously rejected grant applications.[^19] This legal success suggests that judicial checks can help defend academic freedom under sustained political pressure. These developments also highlight the active role of the academic community and civil society organizations as important bulwarks against executive and legislative overreach.[@Pedota_2025; @apsa_statement_2025] What is more, academic research indicates a remarkable resilience of academic freedom, even in situations of democratic backsliding.[@lott2025] There is no guarantee, however, that the steep decline in institutional autonomy in the United States has halted, and further deterioration remains possible.
+
+[^19]: The New York Times "Appeals Court Upholds Prohibition on Trump's Medical Research Cuts" (2026), <https://www.nytimes.com/2026/01/05/us/politics/trump-nih-grant-cuts-court.html>
+
+## Conclusion
+
+This year’s report demonstrates that academic freedom continues to deteriorate in more countries than those where it is improving. Between 2015 and 2025, academic freedom declined in `r toString(afi_negative)` countries, whereas only `r toString(afi_positive)` countries experienced improvements (see @fig-countries).
+
+Among the dimensions of academic freedom, institutional autonomy has proven to be slightly less volatile. Fewer countries have experienced substantial and statistically significant changes (positive or negative) in institutional autonomy over the past decade, compared to such changes in other dimensions, particularly the freedom to research and teach and the freedom of academic and cultural expression.
+
+Despite this relative resilience, any declines in institutional autonomy are cause for concern. Our data indicate that institutional autonomy is positively associated with individual-level indicators, underscoring the role of institutional autonomy as a key safeguard for academic freedom.
+
+This report highlights the decline of university autonomy in the United States, in comparison with the level of protection in European and North American democracies, as well as with declines of institutional autonomy in other major autocratizing democracies, or rather former democracies, namely Hungary, India, and Türkiye. These comparisons highlight that the decline of university autonomy in the United States is unusually fast and steep. At the same time, responses from courts and academic institutions in the United States may still indicate a path toward reversing this harm.
+
+## Overview of Country Scores
+
+Measuring a latent phenomenon like academic freedom is a challenging endeavor. The AFI data meet high academic standards [@Lott_Spannagel_2025; @spannagel_academic_2023] and use the best available model for aggregating expert assessments [@pemstein_vdem_2025].
+
+@fig-top_afi_plot_2026 and @fig-bottom_afi_plot_2026 present the point estimates (points) and uncertainty intervals (lines) for all assessed countries at year-end 2025. They display every country's academic freedom in order of the most likely point estimate, as well as the change over the last ten years if the difference between 2015 and 2025 is statistically significant. We strongly recommend that users consider the reported **uncertainty intervals** when making comparisons over time or between countries [@Lott_Spannagel_2025]. Whenever the uncertainty intervals of two countries overlap, no definitive statement can be made about which country has greater academic freedom.
+
+\newpage
+
+```{r global overview, include = FALSE}
+top_AFI <- country_ranking_2024(year_start = 2015, year_end = 2025) 
+bottom_AFI <- country_ranking_2024(year_start = 2015, year_end = 2025, top = F)
+
+```
+
+```{r top_AFI ,fig.width=7,fig.height=14, fig.align = "center", out.height="92%", echo=FALSE, fig.pos="H"}
+#| label: fig-top_afi_plot_2026
+#| fig-cap: "Countries by Score, Academic Freedom Index, 2015 Compared to 2025. Notes: \\textcolor[HTML]{78130D}{Red country names} indicate cases of statistically significant declining cases of academic freedom over the past ten years. \\textcolor[HTML]{4343d7}{Blue country names} indicate cases of statistically significant increasing cases of academic freedom. Horizontal lines indicate the uncertainty intervals around the point estimates drawn from the V-Dem Bayesian IRT method. Status groups represent the quintiles of the AFI. Countries for which the uncertainty intervals go beyond the limits of a status group cannot be clearly assigned to one status group."
+
+top_AFI
+```
+
+```{r bottom_AFI ,fig.width=7,fig.height=14, fig.align = "center", out.height="92%", echo=FALSE, fig.pos="H"}
+#| label: fig-bottom_afi_plot_2026
+#| fig-cap: "Countries by Score, Academic Freedom Index, 2015 Compared to 2025. Notes: \\textcolor[HTML]{78130D}{Red country names} indicate cases of statistically significant declining cases of academic freedom over the past ten years. \\textcolor[HTML]{4343d7}{Blue country names} indicate cases of statistically significant increasing cases of academic freedom. Horizontal lines indicate the uncertainty intervals around the point estimates drawn from the V-Dem Bayesian IRT method. Status groups represent the quintiles of the AFI. Countries for which the uncertainty intervals go beyond the limits of a status group cannot be clearly assigned to one status group."
+
+bottom_AFI
+```
+
+```{r saving_tables, echo = FALSE}
+
+# Save top_AFI
+ggsave(
+  filename = "figs/top_AFI.png",
+  plot = top_AFI,
+  width = 8,    # adjust as needed
+  height = 15,
+  dpi = 300)
+
+# Save bottom_AFI
+ggsave(
+  filename = "figs/bottom_AFI.png",
+  plot = bottom_AFI,
+  width = 8,    # adjust as needed
+  height = 15,
+  dpi = 300)
+```
+
+Readers may also refer to the index quintiles, or status groups A--E, which are shaded in different colors in @fig-top_afi_plot_2026 and @fig-bottom_afi_plot_2026. Whenever the uncertainty intervals of countries overlap with the shaded colors representing a status group (see the X-axis), no definitive statement can be made about the status group of that particular country. For example, Japan is categorized in status group B, yet its uncertainty interval overlaps with status group A. This suggests it is likely that Japan belongs with status group B, while statistical uncertainty implies that it is also possible that it belongs with status group A. In @fig-top_afi_plot_2026 and @fig-bottom_afi_plot_2026 , the 9 cases of significant improvement in academic freedom are highlighted in blue. Highlighted in red are the 52 countries that have undergone statistically significant declines in academic freedom over the last ten years.[^20]
+
+[^20]: Academic freedom declines are statistically significant but not in a substantially meaningful way in Germany and Austria.
+
+## Background: Assessing Academic Freedom
+
+```{r country_calculation, include = FALSE}
+overall_number_countries <- length(unique(subset(subset(vdem), is.na(v2xca_academ)==F)$country_name)) # 179 countries}
+```
+
+This year's *Academic Freedom Index* update is based on data from V-Dem's version 16 release, drawing on assessments made by `r toString(scales::label_comma(accuracy = NULL)(no_coders_v16))` country experts from around the world.
+
+The data cover the period from `r toString(min(vdem$year, na.rm = T))` to `r toString(max(vdem$year, na.rm = T))`. All data are publicly available and include more than one million data points at the coder level, five indicators, and an aggregate index on academic freedom based on a Bayesian IRT-measurement model.[@pemstein_vdem_2025] The index defines a range of components "often considered essential to the *de facto* realization of academic freedom based on a review of the literature and in-depth discussions with policymakers, academics and advocates in the higher education field" [@spannagel_academic_2023, 3973]. The *Academic Freedom Index* rests on five key indicators: the freedom to research and teach; the freedom of academic exchange and dissemination; the institutional autonomy of universities; campus integrity;[^21] and the freedom of academic and cultural expression. Through these five indicators, the AFI captures elements of academic freedom "that are (a) comparable across different university systems around the world and (b) specific to the academic sector" [@spannagel_academic_2023, 3974].
+
+[^21]: The absence of security infringements and surveillance on campus, including online learning platforms.
+
+Users of our data can benefit from the open data approach adopted by the V-Dem project, which also allows for the disaggregation of the AFI. Furthermore, we provide comparative data on additional aspects of academic freedom, notably factual country-year information on constitutional guarantees and commitments to academic freedom under international human rights law [see also @spannagel_introducing_2023].
+
+### What is the Difference between Versions 15 and 16?
+
+V-Dem uses customized Bayesian IRT models to aggregate expert data to indicators and index values.
+
+Each year, a new calculation takes all available data into account and optimizes comparability between years and countries. However, comparing absolute values of indicators or the index values between different versions of the dataset can be misleading because (1) experts add data with every annual update; (2) experts may update and change their own previous ratings to account for new information; and (3) for every annual update, additional experts are recruited who can also contribute scores for past years. As a general rule, scholars, policymakers, and other interested parties should use the most recent data for information and analysis. Version 16 of the AFI builds on the expertise of `r toString(scales::label_comma(accuracy = NULL)(no_coders_v16))` coders.
+
+## About
+
+The views and opinions expressed in this report are those of the authors and do not reflect any official position of the Friedrich-Alexander-Universität Erlangen-Nürnberg, the V-Dem Project, or the V-Dem Steering Committee.
+
+**Authors**: Katrin Kinzelbach, Staffan I. Lindberg, Lars Lott, Angelo V. Panaro
+
+**Code contribution**: Kelly Morrison, Yuko Sato, Lars Lott
+
+**Copy editor**: Jonathan Grayson
+
+**Cover design**: Soapbox and FAU (Ursula Auer)
+
+**Suggested citation**: Katrin Kinzelbach, Staffan I. Lindberg, Lars Lott, Angelo Vito Panaro. 2026. Academic Freedom Index – 2026 Update. Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) and V-Dem Institute. doi: [10.25593/open-fau-2865](https://doi.org/10.25593/open-fau-2865)
+
+**Funders**: We gratefully acknowledge funding from the Volkswagen Foundation (grant no. 9B286) as well as co-funding for the V-Dem infrastructure from the University of Gothenburg.
+
+{{< pagebreak >}}
+
+## Bibliography
